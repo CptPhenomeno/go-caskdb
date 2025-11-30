@@ -2,8 +2,10 @@ package caskdb
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
+	"time"
 )
 
 // DiskStore is a Log-Structured Hash Table as described in the BitCask paper. We
@@ -47,6 +49,15 @@ import (
 //	   	store.Set("othello", "shakespeare")
 //	   	author := store.Get("othello")
 type DiskStore struct {
+	Storage *os.File
+	Offset  uint32
+	Map     map[string]*KeyEntry
+}
+
+func checkError(err error) {
+	if err != nil {
+		panic(err)
+	}
 }
 
 func isFileExists(fileName string) bool {
@@ -58,17 +69,98 @@ func isFileExists(fileName string) bool {
 }
 
 func NewDiskStore(fileName string) (*DiskStore, error) {
-	panic("implement me")
+	file, err := os.OpenFile(fileName, os.O_CREATE|os.O_RDWR, 0644)
+	if err != nil {
+		return nil, err
+	}
+	diskStore := &DiskStore{Storage: file, Offset: 0, Map: make(map[string]*KeyEntry)}
+
+	for {
+		header := make([]byte, headerSize)
+		readBytes, err := file.Read(header)
+
+		if err == io.EOF || readBytes == 0 {
+			break
+		}
+
+		if err != nil {
+			return nil, err
+		}
+
+		timestamp, keySize, valueSize := decodeHeader(header)
+		totalSize := headerSize + keySize + valueSize
+
+		keyBytes := make([]byte, keySize)
+		_, err = file.Read(keyBytes)
+		if err != nil {
+			return nil, err
+		}
+
+		key := string(keyBytes)
+		keyEntry := NewKeyEntry(timestamp, diskStore.Offset, totalSize)
+		diskStore.Map[key] = &keyEntry
+
+		diskStore.Offset += totalSize
+		_, err = file.Seek(int64(valueSize), io.SeekCurrent)
+	}
+
+	return diskStore, nil
 }
 
 func (d *DiskStore) Get(key string) string {
-	panic("implement me")
+	keyEntry := d.Map[key]
+	if keyEntry == nil {
+		return ""
+	}
+	_, err := d.Storage.Seek(int64(keyEntry.Position), io.SeekStart)
+	if err != nil {
+		return ""
+	}
+
+	row := make([]byte, keyEntry.TotalSize)
+	_, err = d.Storage.Read(row)
+	if err != nil {
+		return ""
+	}
+
+	_, _, value := decodeKV(row)
+	return value
 }
 
 func (d *DiskStore) Set(key string, value string) {
-	panic("implement me")
+	timestamp := uint32(time.Now().Unix())
+	size, row := encodeKV(timestamp, key, value)
+	keyEntry := NewKeyEntry(timestamp, d.Offset, uint32(size))
+
+	_, err := d.Storage.Seek(int64(d.Offset), io.SeekStart)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	_, err = d.Storage.Write(row)
+	if err != nil {
+		panic(err.Error())
+	}
+
+	err = d.Storage.Sync()
+	if err != nil {
+		panic(err.Error())
+	}
+
+	d.Offset += uint32(size)
+	d.Map[key] = &keyEntry
 }
 
 func (d *DiskStore) Close() bool {
-	panic("implement me")
+	err := d.Storage.Sync()
+	if err != nil {
+		return false
+	}
+
+	err = d.Storage.Close()
+	if err != nil {
+		return false
+	}
+
+	return true
 }
