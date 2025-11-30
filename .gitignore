@@ -16,3 +16,5 @@ vendor/
 
 # coverage report file
 coverage.txt
+
+.idea/*

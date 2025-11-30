@@ -1,5 +1,7 @@
 package caskdb
 
+import "encoding/binary"
+
 // format file provides encode/decode functions for serialisation and deserialisation
 // operations
 //
@@ -65,24 +67,44 @@ const headerSize = 12
 // the byte offset in the file. Whenever we insert/update a key, we create a new
 // KeyEntry object and insert that into keyDir.
 type KeyEntry struct {
+	Timestamp uint32
+	Position  uint32
+	TotalSize uint32
 }
 
 func NewKeyEntry(timestamp uint32, position uint32, totalSize uint32) KeyEntry {
-	panic("implement me")
+	return KeyEntry{Timestamp: timestamp, Position: position, TotalSize: totalSize}
 }
 
 func encodeHeader(timestamp uint32, keySize uint32, valueSize uint32) []byte {
-	panic("implement me")
+	header := make([]byte, 0, headerSize)
+	header = binary.LittleEndian.AppendUint32(header, timestamp)
+	header = binary.LittleEndian.AppendUint32(header, keySize)
+	header = binary.LittleEndian.AppendUint32(header, valueSize)
+	return header
 }
 
 func decodeHeader(header []byte) (uint32, uint32, uint32) {
-	panic("implement me")
+	timestamp := binary.LittleEndian.Uint32(header[0:4])
+	keySize := binary.LittleEndian.Uint32(header[4:8])
+	valueSize := binary.LittleEndian.Uint32(header[8:12])
+	return timestamp, keySize, valueSize
 }
 
 func encodeKV(timestamp uint32, key string, value string) (int, []byte) {
-	panic("implement me")
+	keySize := uint32(len(key))
+	valueSize := uint32(len(value))
+	totalSize := headerSize + keySize + valueSize
+	entry := make([]byte, 0, totalSize)
+	entry = append(entry, encodeHeader(timestamp, keySize, valueSize)...)
+	entry = append(entry, []byte(key)...)
+	entry = append(entry, []byte(value)...)
+	return int(totalSize), entry
 }
 
 func decodeKV(data []byte) (uint32, string, string) {
-	panic("implement me")
+	timestamp, keySize, valueSize := decodeHeader(data[0:headerSize])
+	key := string(data[headerSize : headerSize+keySize])
+	value := string(data[headerSize+keySize : headerSize+keySize+valueSize])
+	return timestamp, key, value
 }
